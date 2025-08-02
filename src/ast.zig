@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const allocator = std.heap.page_allocator;
 const parseFloat = std.fmt.parseFloat;
 const parseInt = std.fmt.parseInt;
 const isDigit = std.ascii.isDigit;
@@ -14,18 +15,16 @@ pub const ParseErrors = error{
     InvalidCast,
 };
 
-const char: type = u8;
-
 /// Operators used to make mathematical equations ordered hierarchically.
 pub const PEMDAS = enum(u8) {
     PARENTHESIS = 0,
     EXPONENT = 1,
-    MULTIPLY = 2,
-    DEVIDE = 3,
-    ADDITION = 4,
-    SUBTRACTION = 5,
+    MULTIPLY = 3,
+    DEVIDE = 2,
+    ADDITION = 5,
+    SUBTRACTION = 4,
 
-    pub fn fromChar(token: char) PEMDAS {
+    pub fn fromChar(token: u8) ParseErrors!PEMDAS {
         return switch (token) {
             '+' => PEMDAS.ADDITION,
             '-' => PEMDAS.SUBTRACTION,
@@ -33,7 +32,23 @@ pub const PEMDAS = enum(u8) {
             '/' => PEMDAS.DEVIDE,
             '^' => PEMDAS.EXPONENT,
             '(', ')' => PEMDAS.PARENTHESIS,
+            else => return ParseErrors.InvalidOperator
         };
+    }
+
+    pub fn toChar(token: PEMDAS) u8 {
+        return switch (token) {
+            .MULTIPLY => '*',
+            .DEVIDE => '/',
+            .ADDITION => '+',
+            .SUBTRACTION => '-',
+            .EXPONENT => '^',
+            .PARENTHESIS => '|',
+        };
+    }
+
+    fn int(this: PEMDAS) u8 {
+        return @intFromEnum(this);
     }
 };
 
@@ -42,7 +57,7 @@ const DataOptions = enum { INT, FLOAT, OPERATOR };
 pub const DataTypes = union(DataOptions) {
     INT: i64,
     FLOAT: f64,
-    OPERATOR: *PEMDAS,
+    OPERATOR: PEMDAS,
 };
 
 pub const NodeData = struct {
@@ -74,6 +89,34 @@ pub const Node = struct {
     left: ?*Node = null,
     right: ?*Node = null,
 
+    fn newNode(value: DataTypes) !*Node {
+        var node = try allocator.create(Node);
+        _ = &node;
+        node.* = Node{
+            .data = .{
+                .value = value
+            }
+        };
+
+        return node;
+    }
+
+    fn deinit(this: *Node) void {
+        if (this.left) |left| {
+            left.deinit();
+            allocator.destroy(left);
+        }
+        if (this.right) |right| {
+            right.deinit();
+            allocator.destroy(right);
+        }
+    }
+
+    /// Operator to int
+    fn operToInt(this: *Node) u8 {
+        return this.data.value.OPERATOR.int();
+    }
+
     // It will be handled as float as it doesn't causes any loosie convertion as int to
     // float does
     fn calcData(this: *Node) ParseErrors!f64 {
@@ -91,7 +134,12 @@ pub const Node = struct {
             const leftResult = try left.calcData();
             const rightResult = try right.calcData();
 
-            var result: f64 = switch (this.data.value.OPERATOR.*) {
+            var resultType: DataOptions = .INT;
+            if (left.data.isDataType(.FLOAT) or right.data.isDataType(.FLOAT)) {
+                resultType = .FLOAT;
+            }
+
+            var result: f64 = switch (this.data.value.OPERATOR) {
                 .ADDITION => leftResult + rightResult,
                 .SUBTRACTION => leftResult - rightResult,
                 .MULTIPLY => leftResult * rightResult,
@@ -99,16 +147,12 @@ pub const Node = struct {
                     if (rightResult == 0) 
                         return ParseErrors.DevisionByZero;
 
+                    resultType = .FLOAT;
                     break :blk leftResult / rightResult;
                 },
                 else => return ParseErrors.UnhandledOperation,
             };
             _ = &result;
-
-            var resultType: DataOptions = .INT;
-            if (left.data.isDataType(.FLOAT) or right.data.isDataType(.FLOAT)) {
-                resultType = .FLOAT;
-            }
 
             const value: DataTypes = switch (resultType) {
                 .INT => DataTypes{ .INT = @intFromFloat(result) },
@@ -122,4 +166,101 @@ pub const Node = struct {
         }
         return this.data;
     }
+
+    fn printEquation(this: *Node) !void {
+        if (this.left) |left|
+            try left.printEquation();
+
+        switch (this.data.value) {
+            .INT => print("{d} ", .{ try this.data.toInt() }),
+            .FLOAT => print("{d:.2} ", .{ try this.data.toFloat() }),
+            .OPERATOR => |operation| print("{c} ", .{ operation.toChar() })
+        }
+
+        if (this.right) |right|
+            try right.printEquation();
+    }
 };
+
+fn deinitRoot(root: *Node) void {
+    root.deinit();
+    allocator.destroy(root);
+}
+
+fn parseDataType(str: []const u8) !DataTypes {
+    if ((str.len == 1) and (!std.ascii.isDigit(str[0]))) {
+        var operator = try PEMDAS.fromChar(str[0]);
+        _ = &operator;
+        return DataTypes{
+            .OPERATOR = operator
+        };
+    }
+
+    if (parseInt(i64, str, 10)) |int| {
+        return DataTypes{
+            .INT = int
+        };
+    } else |_| {
+        if (parseFloat(f64, str)) |float| {
+            return DataTypes{
+                .FLOAT = float,
+            };
+        } else |_| {}
+        return ParseErrors.InvalidNumericValue;
+    }
+}
+
+pub fn parse(str: []const u8) !NodeData {
+    var tokens = std.mem.tokenizeAny(u8, str, " \n\t\r");
+
+    if (tokens.peek() == null) 
+        return ParseErrors.IncompletEquation;
+
+    const rootVal = tokens.next().?;
+    var root = try Node.newNode(try parseDataType(rootVal));
+    defer deinitRoot(root);
+    // last APPENDED note!
+    var bufferNode = root;
+
+    while (tokens.next()) |operatorVal| {
+        if (tokens.next()) |numericVal| {
+            const numericNode = try Node.newNode(try parseDataType(numericVal));
+            var operatorNode = try Node.newNode(try parseDataType(operatorVal));
+            operatorNode.right = numericNode;
+
+            if (root.data.value != .OPERATOR) {
+                operatorNode.left = root;
+                root = operatorNode;
+                bufferNode = root;
+                continue;
+            }
+
+            const bufferInt = bufferNode.operToInt();
+            const rootInt = root.operToInt();
+            if (bufferInt > operatorNode.operToInt()) {
+                operatorNode.left = bufferNode.right;
+                bufferNode.right = operatorNode;
+
+                continue;
+            } else if (rootInt > operatorNode.operToInt()) {
+                operatorNode.left = root.right;
+                root.right = operatorNode;
+
+                continue; 
+            } else {
+                operatorNode.left = root;
+                root = operatorNode;
+                bufferNode = root;
+                continue;
+            }
+
+            continue;
+        }
+        return ParseErrors.IncompletEquation;
+    }
+
+    print("\n", .{});
+    try root.printEquation();
+    print("\n", .{});
+    return try root.calc();
+}

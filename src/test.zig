@@ -37,7 +37,8 @@ test "Node calc test" {
     };
 
     var operator = PEMDAS.MULTIPLY;
-    var root = Node{ .data = .{ .value = .{ .OPERATOR = &operator } }, .right = &rightNode, .left = &leftNode };
+    _ = &operator;
+    var root = Node{ .data = .{ .value = .{ .OPERATOR = operator } }, .right = &rightNode, .left = &leftNode };
 
     var result = try root.calc();
     try expect(result.isDataType(.FLOAT));
@@ -61,7 +62,8 @@ test "Node calc integer" {
     };
 
     var operator = PEMDAS.MULTIPLY;
-    var root = Node{ .data = .{ .value = .{ .OPERATOR = &operator } }, .right = &rightNode, .left = &leftNode };
+    _ = &operator;
+    var root = Node{ .data = .{ .value = .{ .OPERATOR = operator } }, .right = &rightNode, .left = &leftNode };
 
     var result = try root.calc();
     try expect(result.isDataType(.INT));
@@ -85,7 +87,46 @@ test "Devide by zero error" {
     };
 
     var operator = PEMDAS.DEVIDE;
-    var root = Node{ .data = .{ .value = .{ .OPERATOR = &operator } }, .right = &rightNode, .left = &leftNode };
+    _ = &operator;
+    var root = Node{ .data = .{ .value = .{ .OPERATOR = operator } }, .right = &rightNode, .left = &leftNode };
 
     try expectError(parser.ParseErrors.DevisionByZero, root.calc());
+}
+
+test "Parsing test" {
+    const parse = parser.parse;
+    {
+        var nodeData = try parse("1 + 3");
+
+        try expect(nodeData.value == .INT);
+        try expectEqual(4, try nodeData.toInt());
+    }
+
+    {
+        var nodeData = try parse("1 + 3.5");
+
+        try expect(nodeData.value == .FLOAT);
+        try expectEqual(4.5, try nodeData.toFloat());
+    }
+
+    {
+        var nodeData = try parse("1 / 2");
+
+        try expect(nodeData.value == .FLOAT);
+        try expectEqual(0.5, try nodeData.toFloat());
+    }
+
+    {
+        var nodeData = try parse("1 - 5 + 7 * 8 - 1");
+
+        try expect(nodeData.value == .INT);
+        try expectEqual(51, try nodeData.toInt());
+    }
+
+    {
+        var nodeData = try parse("7 * 2 - 8 * 3 + 2 * 2");
+
+        try expect(nodeData.value == .INT);
+        try expectEqual(-6, try nodeData.toInt());
+    }
 }
