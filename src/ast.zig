@@ -58,29 +58,37 @@ pub const DataTypes = union(DataOptions) {
     INT: i64,
     FLOAT: f64,
     OPERATOR: PEMDAS,
-};
 
-pub const NodeData = struct {
-    value: DataTypes,
-
-    pub fn toFloat(this: *NodeData) ParseErrors!f64 {
-        return switch (this.value) {
+    fn toFloat(this: DataTypes) ParseErrors!f64 {
+        return switch (this) {
             .INT => |int| @floatFromInt(int),
             .FLOAT => |float| float,
             .OPERATOR => ParseErrors.InvalidCast,
         };
     }
-
-    pub fn toInt(this: *NodeData) ParseErrors!i64 {
-        return switch (this.value) {
+    
+    fn toInt(this: DataTypes) ParseErrors!i64 {
+        return switch (this) {
             .INT => |int| int,
             .FLOAT => |float| @intFromFloat(float),
             .OPERATOR => ParseErrors.InvalidCast,
         };
     }
 
-    pub fn isDataType(this: *NodeData, types: DataOptions) bool {
-        return this.value == types;
+    pub fn isDataType(this: DataTypes, types: DataOptions) bool {
+        return this == types;
+    }
+};
+
+pub const NodeData = struct {
+    value: DataTypes,
+
+    pub fn toFloat(this: *NodeData) ParseErrors!f64 {
+        return this.value.toFloat();
+    }
+
+    pub fn toInt(this: *NodeData) ParseErrors!i64 {
+        return this.value.toInt();
     }
 };
 
@@ -119,25 +127,29 @@ pub const Node = struct {
 
     // It will be handled as float as it doesn't causes any loosie convertion as int to
     // float does
-    fn calcData(this: *Node) ParseErrors!f64 {
-        return this.data.toFloat() catch {
-            var data = try this.calc();
-            return try data.toFloat();
-        };
+    fn calcData(this: *Node) ParseErrors!DataTypes {
+        if (this.data.value == .OPERATOR) {
+            const data = try this.calc();
+            return data.value;
+        }
+        return this.data.value;
     }
 
     pub fn calc(this: *Node) !NodeData {
-        if (this.data.isDataType(.OPERATOR)) { 
+        if (this.data.value.isDataType(.OPERATOR)) { 
             var left: *Node = this.left orelse return ParseErrors.IncompletEquation;
             var right: *Node = this.right orelse return ParseErrors.IncompletEquation;
 
-            const leftResult = try left.calcData();
-            const rightResult = try right.calcData();
+            const leftResultType = try left.calcData();
+            const rightResultType = try right.calcData();
 
             var resultType: DataOptions = .INT;
-            if (left.data.isDataType(.FLOAT) or right.data.isDataType(.FLOAT)) {
+            if (leftResultType.isDataType(.FLOAT) or rightResultType.isDataType(.FLOAT)) {
                 resultType = .FLOAT;
             }
+
+            const leftResult = try leftResultType.toFloat();
+            const rightResult = try rightResultType.toFloat();
 
             var result: f64 = switch (this.data.value.OPERATOR) {
                 .ADDITION => leftResult + rightResult,

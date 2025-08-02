@@ -41,7 +41,7 @@ test "Node calc test" {
     var root = Node{ .data = .{ .value = .{ .OPERATOR = operator } }, .right = &rightNode, .left = &leftNode };
 
     var result = try root.calc();
-    try expect(result.isDataType(.FLOAT));
+    try expect(result.value.isDataType(.FLOAT));
     try expectEqual(try result.toFloat(), 550);
 }
 
@@ -66,7 +66,7 @@ test "Node calc integer" {
     var root = Node{ .data = .{ .value = .{ .OPERATOR = operator } }, .right = &rightNode, .left = &leftNode };
 
     var result = try root.calc();
-    try expect(result.isDataType(.INT));
+    try expect(result.value.isDataType(.INT));
     try expectEqual(try result.toFloat(), 500);
 }
 
@@ -128,5 +128,12 @@ test "Parsing test" {
 
         try expect(nodeData.value == .INT);
         try expectEqual(-6, try nodeData.toInt());
+    }
+
+    {
+        var nodeData = try parse("1 - 5 + 7 * 8 - 1.00");
+
+        try expect(nodeData.value == .FLOAT);
+        try expectEqual(51.00, try nodeData.toFloat());
     }
 }
